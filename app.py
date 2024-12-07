@@ -5,8 +5,8 @@ app = Flask(__name__)
 
 # Inisialisasi predictor
 predictor = SentimentPredictor(
-    model_path='model_export/sentiment_model.joblib',
-    vectorizer_path='model_export/tfidf_vectorizer.joblib'
+    model_path='model_export/sentiment_model.joblib.gz',
+    vectorizer_path='model_export/tfidf_vectorizer.joblib.gz'
 )
 
 @app.route('/predict', methods=['POST'])

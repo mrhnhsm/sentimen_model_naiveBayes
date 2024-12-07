@@ -1,25 +1,31 @@
 import joblib
 import re
+import gzip
 
 class SentimentPredictor:
     def __init__(self, model_path, vectorizer_path):
         """
-        Inisialisasi predictor dengan model dan vectorizer
+        Inisialisasi predictor dengan model dan vectorizer terkompresi
         
         Args:
-            model_path: Path ke model tersimpan
-            vectorizer_path: Path ke vectorizer tersimpan
+            model_path: Path ke model terkompresi
+            vectorizer_path: Path ke vectorizer terkompresi
         """
-        self.model = joblib.load(model_path)
-        self.vectorizer = joblib.load(vectorizer_path)
+        # Baca model dengan gzip
+        with gzip.open(model_path, 'rb') as f:
+            self.model = joblib.load(f)
+        
+        # Baca vectorizer dengan gzip
+        with gzip.open(vectorizer_path, 'rb') as f:
+            self.vectorizer = joblib.load(f)
     
     def clean_text(self, text):
         """Membersihkan teks input"""
-        text = re.sub(r'@\w+', '', text)
+        text = re.sub(r'@\w+', '', str(text))
         text = re.sub(r'http\S+', '', text)
         text = re.sub(r'\d+', '', text)
         text = re.sub(r'[^\w\s]', '', text)
-        text = text.lower()
+        text = text.lower().strip()
         return text
     
     def predict(self, text):
@@ -38,18 +44,32 @@ class SentimentPredictor:
         probabilities = self.model.predict_proba(vectorized_text)[0]
         
         return {
+            'text': text,
             'sentiment': 'Positif' if prediction == 1 else 'Negatif',
-            'confidence': max(probabilities) * 100
+            'confidence': f"{max(probabilities) * 100:.2f}%"
         }
 
 # Contoh penggunaan
 if __name__ == "__main__":
-    predictor = SentimentPredictor(
-        model_path='model_export/sentiment_model.joblib',
-        vectorizer_path='model_export/tfidf_vectorizer.joblib'
-    )
+    try:
+        predictor = SentimentPredictor(
+            model_path='model_export/sentiment_model.joblib.gz',
+            vectorizer_path='model_export/tfidf_vectorizer.joblib.gz'
+        )
+        
+        # Uji coba prediksi
+        test_texts = [
+            "Produk ini sangat bagus dan recommended",
+            "Layanan yang buruk dan tidak memuaskan",
+            "Biasa saja, tidak ada yang istimewa"
+        ]
+        
+        for text in test_texts:
+            result = predictor.predict(text)
+            print("\nHasil Analisis:")
+            print(f"Teks: {result['text']}")
+            print(f"Sentimen: {result['sentiment']}")
+            print(f"Kepercayaan: {result['confidence']}")
     
-    # Uji coba prediksi
-    text = "Ini adalah contoh teks untuk dianalisis"
-    result = predictor.predict(text)
-    print(result)
+    except Exception as e:
+        print(f"Terjadi kesalahan: {e}")

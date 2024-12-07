@@ -2,16 +2,18 @@ import pandas as pd
 import csv
 import os
 import re
-import joblib  # Tambahkan import joblib
+import gzip
+import joblib
+import gc
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.naive_bayes import MultinomialNB
+from sklearn.linear_model import LogisticRegression  # Lighter model
 from sklearn.metrics import accuracy_score, classification_report
 
 # Fungsi untuk membersihkan teks
 def clean_text(text):
     # Menghapus mention (contoh: @user)
-    text = re.sub(r'@\w+', '', text)
+    text = re.sub(r'@\w+', '', str(text))
     # Menghapus URL
     text = re.sub(r'http\S+', '', text)
     # Menghapus angka
@@ -19,299 +21,293 @@ def clean_text(text):
     # Menghapus tanda baca
     text = re.sub(r'[^\w\s]', '', text)
     # Mengubah teks menjadi huruf kecil
-    text = text.lower()
+    text = text.lower().strip()
     return text
 
-# Fungsi untuk mengekspor model
-def export_model(model, vectorizer, output_dir='model_export'):
+# Fungsi untuk mengekspor model dengan kompresi
+def export_compressed_model(model, vectorizer, output_dir='model_export'):
     """
-    Fungsi untuk mengekspor model dan vectorizer
+    Fungsi untuk mengekspor model dan vectorizer dengan kompresi
     
     Args:
-        model: Model Naive Bayes yang telah dilatih
+        model: Model yang telah dilatih
         vectorizer: TF-IDF Vectorizer
         output_dir: Direktori untuk menyimpan model
     """
     # Pastikan direktori export ada
     os.makedirs(output_dir, exist_ok=True)
     
-    # Simpan model
-    joblib.dump(model, os.path.join(output_dir, 'sentiment_model.joblib'))
+    # Compress dan simpan model dengan gzip
+    with gzip.open(os.path.join(output_dir, 'sentiment_model.joblib.gz'), 'wb') as f:
+        joblib.dump(model, f, compress=('gzip', 3))
     
-    # Simpan vectorizer
-    joblib.dump(vectorizer, os.path.join(output_dir, 'tfidf_vectorizer.joblib'))
+    # Compress dan simpan vectorizer dengan gzip
+    with gzip.open(os.path.join(output_dir, 'tfidf_vectorizer.joblib.gz'), 'wb') as f:
+        joblib.dump(vectorizer, f, compress=('gzip', 3))
     
-    print(f"Model dan vectorizer berhasil disimpan di {output_dir}")
+    print(f"Model terkompresi berhasil disimpan di {output_dir}")
 
-# Read the CSV data
-file_path = r"D:\Dhea-Sayang\DataTraining.csv" #Path Menuju Data Training
-
-# Tambahkan pengecekan file exists
-if not os.path.exists(file_path):
-    raise FileNotFoundError(f"File tidak ditemukan di: {file_path}")
-
-try:
-    # Membaca file dengan parameter yang lebih spesifik
-    df = pd.read_csv(
-       file_path, 
-       encoding='utf-8', 
-       sep=';',  # Delimiter yang jelas
-       quoting=csv.QUOTE_ALL,  # Menangani quote yang kompleks
-       quotechar='"',  # Karakter quote
-       escapechar='\\',  # Karakter escape
-       doublequote=True,  # Mengizinkan double quote
-       engine='python',  # Parser Python untuk fleksibilitas
-       on_bad_lines='skip'  # Skip baris bermasalah
-    )
-    
-    # Membersihkan nama kolom
-    df.columns = [col.strip().strip('"').strip("'") for col in df.columns]
-
-except Exception as e:
-    print(f"Error membaca file: {str(e)}")
-    # Mencoba alternatif jika metode pertama gagal
-    try:
-        print("Mencoba metode alternatif...")
-        # Membaca dengan delimiter yang tepat
-        df = pd.read_csv(
-            file_path, 
-            sep=',',  # Delimiter yang jelas
-            encoding='utf-8', 
-            quotechar='"',  # Karakter quote
-            escapechar='\\',  # Karakter escape
-            doublequote=True,  # Mengizinkan double quote
-            skipinitialspace=True,  # Mengabaikan spasi di awal
-            engine='python',  # Parser Python
-            on_bad_lines='skip'  # Skip baris bermasalah
-        )
-        df.columns = [col.strip().strip('"').strip("'") for col in df.columns]
-        print("Berhasil membaca dengan metode alternatif!")
-        
-    except Exception as e2:
-        print(f"Error pada metode alternatif: {str(e2)}")
-        raise
-
-# Ganti nama kolom yang mengandung 'full_text'
-for col in df.columns:
-    if 'full_text' in col.lower():
-        df = df.rename(columns={col: 'full_text'})
-        break
-
-# Pastikan kolom 'full_text' ada
-if 'full_text' in df.columns:
-    # Clean 'full_text' column
-    df['cleaned_text'] = df['full_text'].apply(clean_text)
-else:
-    # Print kolom yang tersedia untuk debugging
-    print("Kolom yang tersedia:", list(df.columns))
-    print("Kolom 'full_text' tidak ditemukan!")
-    raise KeyError("Kolom 'full_text' tidak ditemukan dalam DataFrame")
-
-def assign_sentiment(text):
-    text = str(text).lower()
-    positive_words = ['bagus', 'pintar', 'berguna', 'cerdas', 'tepat', 'keren', 'mantul', 'gokil']
-    negative_words = ['bodoh', 'gagal', 'jelek', 'lebay', 'pecundang', 'tidak berguna', 'tolol']
-    
-    # Count occurrences of positive and negative words
-    positive_count = sum(1 for word in positive_words if word in text)
-    negative_count = sum(1 for word in negative_words if word in text)
-    
-    # Improved logic for sentiment assignment
-    if negative_count > 0:
-        return 0  # Negative sentiment
-    elif positive_count > 0:
-        return 1  # Positive sentiment
-    else:
-        return -1  # Neutral (you might want to handle this case differently)
-
-# Create sentiment labels with the modified function
-labels = df['cleaned_text'].apply(assign_sentiment)
-
-# Remove neutral sentiments if you want to focus only on positive and negative
-df = df[labels != -1]
-labels = labels[labels != -1]
-
-# Preprocessing and vectorizing data
-# Vectorization and model training
-vectorizer = TfidfVectorizer(
-    max_features=5000,
-    ngram_range=(1, 2),
-    strip_accents='unicode',
-    lowercase=True
-)
-
-# Menggunakan teks yang sudah dibersihkan
-X = vectorizer.fit_transform(df['cleaned_text'])
-y = labels
-
-# Splitting data
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, 
-    test_size=0.2, 
-    random_state=42,
-    stratify=y  # This ensures balanced split
-)
-
-# Model training and evaluation
-model = MultinomialNB(class_prior=[0.5, 0.5])  # Give equal prior probabilities
-model.fit(X_train, y_train)
-y_pred = model.predict(X_test)
-
-# Menampilkan Hasil Training
-print("\nModel Performance:")
-print("----------------")
-print(f"Accuracy: {accuracy_score(y_test, y_pred):.2f}")
-print("\nDetailed Training Classification Report:")
-print(classification_report(y_test, y_pred))
-
-# Tambahkan pemanggilan export_model di akhir script
-export_model(model, vectorizer)
-
-#Uji Coba Untuk Testing Data
-def read_test_data(test_file_path):
+# Fungsi untuk membaca data dengan robust error handling
+def read_csv_robust(file_path):
     """
-    Reads and processes test data CSV with robust error handling and column checking.
+    Membaca file CSV dengan metode robust
     
     Args:
-        test_file_path (str): Path to the test CSV file
+        file_path (str): Path ke file CSV
     
     Returns:
-        pandas.DataFrame: Processed DataFrame
+        pandas.DataFrame: DataFrame yang telah dibaca
     """
-    # Check if file exists
-    if not os.path.exists(test_file_path):
-        raise FileNotFoundError(f"File tidak ditemukan di: {test_file_path}")
-
-    print("\nProcessing Testing Data:")
-    print("----------------------")
-
     try:
-        # First attempt to read the CSV
-        test_df = pd.read_csv(
-            test_file_path,
-            sep=',',
-            header=0,
-            encoding='utf-8',
-            quoting=csv.QUOTE_ALL,
-            escapechar='\\',
-            doublequote=True,
-            engine='python',
+        # Metode pertama dengan parameter lengkap
+        df = pd.read_csv(
+            file_path, 
+            encoding='utf-8', 
+            sep=';',  
+            quoting=csv.QUOTE_ALL,  
+            quotechar='"',  
+            escapechar='\\',  
+            doublequote=True,  
+            engine='python',  
             on_bad_lines='skip'
         )
         
-        # Clean column names
-        test_df.columns = [col.strip().strip('"').strip("'") for col in test_df.columns]
+        # Membersihkan nama kolom
+        df.columns = [col.strip().strip('"').strip("'") for col in df.columns]
         
     except Exception as e:
         print(f"Error membaca file dengan metode pertama: {str(e)}")
         print("Mencoba metode alternatif...")
         
         try:
-            # Alternative reading method
-            test_df = pd.read_csv(
-                test_file_path,
-                encoding='utf-8',
-                sep=',',
-                quotechar='"',
-                escapechar='\\',
-                engine='python',
+            # Metode alternatif
+            df = pd.read_csv(
+                file_path, 
+                sep=',',  
+                encoding='utf-8', 
+                quotechar='"',  
+                escapechar='\\',  
+                doublequote=True,  
+                skipinitialspace=True,  
+                engine='python',  
                 on_bad_lines='skip'
             )
-            test_df.columns = [col.strip().strip('"').strip("'") for col in test_df.columns]
-            print("Berhasil membaca dengan metode alternatif!")
+            df.columns = [col.strip().strip('"').strip("'") for col in df.columns]
             
         except Exception as e2:
             print(f"Error pada metode alternatif: {str(e2)}")
             raise
+    
+    return df
 
-    # Print available columns for debugging
-    # print("\nKolom yang tersedia:", list(test_df.columns))
+# Fungsi untuk menentukan sentimen
+def assign_sentiment(text):
+    text = str(text).lower()
+    positive_words = ['bagus', 'pintar', 'berguna', 'cerdas', 'tepat', 'keren', 'mantul', 'gokil']
+    negative_words = ['bodoh', 'gagal', 'jelek', 'lebay', 'pecundang', 'tidak berguna', 'tolol']
+    
+    # Hitung kemunculan kata positif dan negatif
+    positive_count = sum(1 for word in positive_words if word in text)
+    negative_count = sum(1 for word in negative_words if word in text)
+    
+    # Logika penentuan sentimen yang disempurnakan
+    if negative_count > 0:
+        return 0  # Sentimen Negatif
+    elif positive_count > 0:
+        return 1  # Sentimen Positif
+    else:
+        return -1  # Netral
 
-    # Look for full_text column with case-insensitive matching
+def train_sentiment_model(training_file_path):
+    """
+    Fungsi untuk melatih model sentimen dengan optimasi
+    
+    Args:
+        training_file_path (str): Path ke file CSV training
+    
+    Returns:
+        tuple: Model, Vectorizer
+    """
+    # Baca data training
+    df = read_csv_robust(training_file_path)
+    
+    # Identifikasi kolom 'full_text'
     full_text_col = None
-    for col in test_df.columns:
+    for col in df.columns:
         if 'full_text' in col.lower():
             full_text_col = col
-            test_df = test_df.rename(columns={col: 'full_text'})
-            # print(f"Menemukan kolom full_text dengan nama asli: {col}")
+            df = df.rename(columns={col: 'full_text'})
             break
-
+    
     if full_text_col is None:
-        print("\nPeringatan: Kolom 'full_text' tidak ditemukan!")
-        print("Mohon periksa nama kolom yang tersedia di atas.")
-        raise KeyError("Kolom 'full_text' tidak ditemukan dalam DataFrame")
-
-    print("\nBerhasil memproses file CSV:")
-    print(f"- Jumlah baris: {len(test_df)}")
-    print(f"- Jumlah kolom: {len(test_df.columns)}")
+        raise KeyError("Kolom 'full_text' tidak ditemukan!")
     
-    return test_df
-
-# Usage example:
-try:
-    test_file_path = r"D:\Dhea-Sayang\DataTesting.csv" #Path Menuju File Data Testing
-    test_df = read_test_data(test_file_path)
+    # Bersihkan teks
+    df['cleaned_text'] = df['full_text'].apply(clean_text)
     
-    # Continue with your sentiment analysis
+    # Buat label sentimen
+    labels = df['cleaned_text'].apply(assign_sentiment)
+    
+    # Hapus data netral
+    df = df[labels != -1]
+    labels = labels[labels != -1]
+    
+    # Vectorization dengan fitur yang dikurangi
+    vectorizer = TfidfVectorizer(
+        max_features=1000,  # Kurangi jumlah fitur
+        ngram_range=(1, 1),  # Hanya unigram
+        strip_accents='unicode',
+        lowercase=True
+    )
+    
+    # Transformasi teks
+    X = vectorizer.fit_transform(df['cleaned_text'])
+    y = labels
+    
+    # Split data
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, 
+        test_size=0.2, 
+        random_state=42,
+        stratify=y
+    )
+    
+    # Model Logistik Regresi yang lebih ringan
+    model = LogisticRegression(
+        max_iter=1000, 
+        solver='lbfgs', 
+        class_weight='balanced'
+    )
+    
+    # Latih model
+    model.fit(X_train, y_train)
+    
+    # Prediksi dan evaluasi
+    y_pred = model.predict(X_test)
+    
+    # Tampilkan metrik
+    print("\nPerforma Model:")
+    print("----------------")
+    print(f"Akurasi: {accuracy_score(y_test, y_pred):.2f}")
+    print("\nLaporan Klasifikasi Terperinci:")
+    print(classification_report(y_test, y_pred))
+    
+    # Bersihkan memori
+    del X_train, X_test, y_train, y_test
+    gc.collect()
+    
+    return model, vectorizer
+
+def load_compressed_model(model_path, vectorizer_path):
+    """
+    Memuat model dan vectorizer yang terkompresi
+    
+    Args:
+        model_path (str): Path ke model terkompresi
+        vectorizer_path (str): Path ke vectorizer terkompresi
+    
+    Returns:
+        tuple: Model, Vectorizer
+    """
+    with gzip.open(model_path, 'rb') as f:
+        model = joblib.load(f)
+    
+    with gzip.open(vectorizer_path, 'rb') as f:
+        vectorizer = joblib.load(f)
+    
+    return model, vectorizer
+
+def analyze_sentiment(text, model, vectorizer):
+    """
+    Menganalisis sentimen untuk teks tunggal
+    
+    Args:
+        text (str): Teks yang akan dianalisis
+        model: Model sentimen yang telah dilatih
+        vectorizer: Vectorizer yang telah dilatih
+    
+    Returns:
+        dict: Hasil analisis sentimen
+    """
+    # Bersihkan teks
+    cleaned_text = clean_text(text)
+    
+    # Vektorisasi
+    vectorized_text = vectorizer.transform([cleaned_text])
+    
+    # Prediksi
+    prediction = model.predict(vectorized_text)[0]
+    
+    # Probabilitas
+    probabilities = model.predict_proba(vectorized_text)[0]
+    confidence = max(probabilities) * 100
+    
+    # Mapping sentimen
+    sentiment_map = {0: 'Negatif', 1: 'Positif'}
+    
+    return {
+        'text': text,
+        'sentiment': sentiment_map.get(prediction, 'Netral'),
+        'confidence': f"{confidence:.2f}%"
+    }
+
+def main():
+    # Path file
+    training_file_path = r"D:\Dhea-Sayang\DataTraining.csv"
+    testing_file_path = r"D:\Dhea-Sayang\DataTesting.csv"
+    model_export_dir = 'model_export'
+    
+    # Latih model
+    model, vectorizer = train_sentiment_model(training_file_path)
+    
+    # Ekspor model terkompresi
+    export_compressed_model(model, vectorizer, model_export_dir)
+    
+    # Analisis data testing
+    test_df = read_csv_robust(testing_file_path)
     test_df['cleaned_text'] = test_df['full_text'].apply(clean_text)
-    X_new_test = vectorizer.transform(test_df['cleaned_text'])
-    test_predictions = model.predict(X_new_test)
     
-    # Count sentiments
+    X_test = vectorizer.transform(test_df['cleaned_text'])
+    test_predictions = model.predict(X_test)
+    
+    # Ringkasan sentimen
     sentiment_counts = {
-        'Positive': sum(test_predictions == 1),
-        'Negative': sum(test_predictions == 0),
-        'Netral': sum(test_predictions == -1),
+        'Positif': sum(test_predictions == 1),
+        'Negatif': sum(test_predictions == 0),
         'Total': len(test_predictions)
     }
     
-    print("\nTesting Data Analysis Results:")
-    print(f"Total texts analyzed: {sentiment_counts['Total']}")
-    print(f"Positive sentiments: {sentiment_counts['Positive']} ({(sentiment_counts['Positive']/sentiment_counts['Total']*100):.2f}%)")
-    print(f"Negative sentiments: {sentiment_counts['Negative']} ({(sentiment_counts['Negative']/sentiment_counts['Total']*100):.2f}%)")
-    print(f"Netral sentiments: {sentiment_counts['Netral']} ({(sentiment_counts['Netral']/sentiment_counts['Total']*100):.2f}%)")
-    
-    # Add predictions to the testing DataFrame
-    test_df['predicted_sentiment'] = test_predictions
-    
-    # Menampilkan Contoh Data Serta Klasifikasinya
-    # print("\nSample of Testing Results:")
-    # for i, (text, sentiment) in enumerate(zip(test_df['full_text'][:5], test_predictions[:5])):
-    #     print(f"\nText {i+1}: {text}")
-    #     print(f"Predicted Sentiment: {'Positive' if sentiment == 1 else 'Negative'}")
+    # Tampilkan ringkasan
+    print("\nAnalisis Data Testing:")
+    print(f"Total teks: {sentiment_counts['Total']}")
+    print(f"Positif: {sentiment_counts['Positif']} ({sentiment_counts['Positif']/sentiment_counts['Total']*100:.2f}%)")
+    print(f"Negatif: {sentiment_counts['Negatif']} ({sentiment_counts['Negatif']/sentiment_counts['Total']*100:.2f}%)")
 
-except Exception as e:
-    print(f"Error processing testing data: {str(e)}")
+if __name__ == "__main__":
+    main()
 
-# Interactive input analysis
-def analyze_user_input():
-    print("\nInteractive Sentiment Analysis")
-    print("Type 'exit' to quit")
-    print("-" * 30)
+    # Interaktif analisis sentimen
+    print("\nAnalisis Sentimen Interaktif")
+    print("Ketik 'keluar' untuk berhenti")
+    
+    # Muat model terkompresi
+    model, vectorizer = load_compressed_model(
+        'model_export/sentiment_model.joblib.gz', 
+        'model_export/tfidf_vectorizer.joblib.gz'
+    )
     
     while True:
-        user_input = input("\nEnter text to analyze: ")
+        user_input = input("\nMasukkan teks untuk dianalisis: ")
         
-        if user_input.lower() == 'exit':
-            print("Exiting interactive analysis...")
+        if user_input.lower() == 'keluar':
+            print("Keluar dari analisis...")
             break
         
-        # Clean and process user input
-        cleaned_input = clean_text(user_input)
-        vectorized_input = vectorizer.transform([cleaned_input])
-        prediction = model.predict(vectorized_input)[0]
+        # Analisis sentimen
+        result = analyze_sentiment(user_input, model, vectorizer)
         
-        # Get prediction probability
-        probabilities = model.predict_proba(vectorized_input)[0]
-        confidence = max(probabilities) * 100
-        
-        # Display results
-        print("\nAnalysis Results:")
-        print(f"Text: {user_input}")
-        print(f"Sentiment: {'Positive' if prediction == 1 else 'Negative' if prediction == 0 else 'Netral'}")
-        print(f"Confidence: {confidence:.2f}%")
-
-# Run interactive analysis
-if __name__ == "__main__":
-    print("\nStarting interactive analysis...")
-    analyze_user_input()
+        # Tampilkan hasil
+        print("\nHasil Analisis:")
+        print(f"Teks: {result['text']}")
+        print(f"Sentimen: {result['sentiment']}")
+        print(f"Kepercayaan: {result['confidence']}")
