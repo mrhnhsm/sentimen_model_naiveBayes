@@ -2,6 +2,7 @@ import pandas as pd
 import csv
 import os
 import re
+import joblib
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.naive_bayes import MultinomialNB
@@ -22,10 +23,7 @@ def clean_text(text):
     return text
 
 # Read the CSV data
-file_path = r"D:\Dhea-Sayang\sentimen-model\DataTraining.csv" #Path Menuju Data Training
-
-# with open(file_path, 'r', encoding='utf-8') as f:
-#     print(f.read()[:500])  # Tampilkan 500 karakter pertama
+file_path = r"D:\Dhea-Sayang\sentimen-model\DataTraining.csv"  # Path Menuju Data Training
 
 # Tambahkan pengecekan file exists
 if not os.path.exists(file_path):
@@ -44,15 +42,8 @@ try:
        engine='python',  # Parser Python untuk fleksibilitas
        on_bad_lines='skip'  # Skip baris bermasalah
     )
-    
     # Membersihkan nama kolom
     df.columns = [col.strip().strip('"').strip("'") for col in df.columns]
-    # print("Berhasil membaca dengan metode Utama!")
-    
-
-    # Cetak informasi debugging
-    # print("Jumlah baris:", len(df))
-    # print("Kolom:", list(df.columns))
 
 except Exception as e:
     print(f"Error membaca file: {str(e)}")
@@ -73,10 +64,6 @@ except Exception as e:
         )
         df.columns = [col.strip().strip('"').strip("'") for col in df.columns]
         print("Berhasil membaca dengan metode alternatif!")
-        # Cetak informasi debugging
-        # print("Jumlah baris:", len(df))
-        # print("Kolom:", list(df.columns))
-        
     except Exception as e2:
         print(f"Error pada metode alternatif: {str(e2)}")
         raise
@@ -89,14 +76,8 @@ for col in df.columns:
 
 # Pastikan kolom 'full_text' ada
 if 'full_text' in df.columns:
-    # print("Kolom 'full_text' ditemukan!")
-    # print(df['full_text'])
-    # Clean 'full_text' column
     df['cleaned_text'] = df['full_text'].apply(clean_text)
-    # print(df['cleaned_text'])
 else:
-    # Print kolom yang tersedia untuk debugging
-    print("Kolom yang tersedia:", list(df.columns))
     print("Kolom 'full_text' tidak ditemukan!")
     raise KeyError("Kolom 'full_text' tidak ditemukan dalam DataFrame")
 
@@ -104,31 +85,25 @@ def assign_sentiment(text):
     text = str(text).lower()
     positive_words = ['bagus', 'pintar', 'berguna', 'cerdas', 'tepat', 'keren', 'mantul', 'gokil']
     negative_words = ['bodoh', 'gagal', 'jelek', 'lebay', 'pecundang', 'tidak berguna', 'tolol']
-
-    #Dia Bodoh tapi dia keren dan baik
     
-    # Count probabilition of positive and negative words
-    positive_count = sum(1 for word in positive_words if word in text) # 1
-    negative_count = sum(1 for word in negative_words if word in text) #0,5
+    positive_count = sum(1 for word in positive_words if word in text)
+    negative_count = sum(1 for word in negative_words if word in text)
     
-    # Improved logic for sentiment assignment
     if negative_count > 0:
         return 0  # Negative sentiment
     elif positive_count > 0:
         return 1  # Positive sentiment
     else:
-        return -1  # Neutral (you might want to handle this case differently)
+        return -1  # Neutral
 
-# Create sentiment labels with the modified function
+# Create sentiment labels
 labels = df['cleaned_text'].apply(assign_sentiment)
 
-# Remove neutral sentiments if you want to focus only on positive and negative
+# Remove neutral sentiments
 df = df[labels != -1]
 labels = labels[labels != -1]
 
-
 # Preprocessing and vectorizing data
-# Vectorization and model training
 vectorizer = TfidfVectorizer(
     max_features=5000,
     ngram_range=(1, 2),
@@ -145,42 +120,54 @@ X_train, X_test, y_train, y_test = train_test_split(
     X, y, 
     test_size=0.2, 
     random_state=42,
-    stratify=y  # This ensures balanced split
+    stratify=y
 )
 
 # Model training and evaluation
-model = MultinomialNB(class_prior=[0.5, 0.5])  # Give equal prior probabilities
+model = MultinomialNB(class_prior=[0.5, 0.5])
 model.fit(X_train, y_train)
 y_pred = model.predict(X_test)
 
-#Menampilkam Hasil Training
+# Menampilkan Hasil Training
 print("\nModel Performance:")
 print("----------------")
 print(f"Accuracy: {accuracy_score(y_test, y_pred):.2f}")
 print("\nDetailed Training Classification Report:")
 print(classification_report(y_test, y_pred))
 
-
-#Uji Coba Untuk Testing Data
-def read_test_data(test_file_path):
+# Fungsi untuk mengekspor model dan vectorizer
+def export_model_and_vectorizer(model, vectorizer, output_dir='model_export'):
     """
-    Reads and processes test data CSV with robust error handling and column checking.
+    Menyimpan model dan vectorizer ke dalam file menggunakan joblib.
     
     Args:
-        test_file_path (str): Path to the test CSV file
-    
-    Returns:
-        pandas.DataFrame: Processed DataFrame
+        model: Model sentiment analysis (contoh: MultinomialNB)
+        vectorizer: TfidfVectorizer yang digunakan untuk pemrosesan teks
+        output_dir: Direktori untuk menyimpan file model dan vectorizer (default: 'model_export')
     """
-    # Check if file exists
+    # Memastikan direktori output ada
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    # Menyimpan model ke dalam file
+    model_filename = os.path.join(output_dir, 'sentiment_model.joblib')
+    joblib.dump(model, model_filename)
+    print(f"Model berhasil disimpan di: {model_filename}")
+    
+    # Menyimpan vectorizer ke dalam file
+    vectorizer_filename = os.path.join(output_dir, 'tfidf_vectorizer.joblib')
+    joblib.dump(vectorizer, vectorizer_filename)
+    print(f"Vectorizer berhasil disimpan di: {vectorizer_filename}")
+
+# Ekspor model dan vectorizer
+export_model_and_vectorizer(model, vectorizer, output_dir='model_export')
+
+# Uji Coba Untuk Testing Data
+def read_test_data(test_file_path):
     if not os.path.exists(test_file_path):
         raise FileNotFoundError(f"File tidak ditemukan di: {test_file_path}")
 
-    print("\nProcessing Testing Data:")
-    print("----------------------")
-
     try:
-        # First attempt to read the CSV
         test_df = pd.read_csv(
             test_file_path,
             sep=',',
@@ -192,16 +179,11 @@ def read_test_data(test_file_path):
             engine='python',
             on_bad_lines='skip'
         )
-        
-        # Clean column names
         test_df.columns = [col.strip().strip('"').strip("'") for col in test_df.columns]
-        
     except Exception as e:
         print(f"Error membaca file dengan metode pertama: {str(e)}")
         print("Mencoba metode alternatif...")
-        
         try:
-            # Alternative reading method
             test_df = pd.read_csv(
                 test_file_path,
                 encoding='utf-8',
@@ -212,41 +194,28 @@ def read_test_data(test_file_path):
                 on_bad_lines='skip'
             )
             test_df.columns = [col.strip().strip('"').strip("'") for col in test_df.columns]
-            print("Berhasil membaca dengan metode alternatif!")
-            
         except Exception as e2:
             print(f"Error pada metode alternatif: {str(e2)}")
             raise
 
-    # Print available columns for debugging
-    # print("\nKolom yang tersedia:", list(test_df.columns))
-
-    # Look for full_text column with case-insensitive matching
     full_text_col = None
     for col in test_df.columns:
         if 'full_text' in col.lower():
             full_text_col = col
             test_df = test_df.rename(columns={col: 'full_text'})
-            # print(f"Menemukan kolom full_text dengan nama asli: {col}")
             break
 
     if full_text_col is None:
-        print("\nPeringatan: Kolom 'full_text' tidak ditemukan!")
-        print("Mohon periksa nama kolom yang tersedia di atas.")
         raise KeyError("Kolom 'full_text' tidak ditemukan dalam DataFrame")
 
-    print("\nBerhasil memproses file CSV:")
-    print(f"- Jumlah baris: {len(test_df)}")
-    print(f"- Jumlah kolom: {len(test_df.columns)}")
-    
     return test_df
 
 # Usage example:
 try:
-    test_file_path = r"D:\Dhea-Sayang\sentimen-model\DataTesting.csv" #Path Menuju File Data Testing
+    test_file_path = r"D:\Dhea-Sayang\sentimen-model\DataTesting.csv"  # Path Menuju File Data Testing
     test_df = read_test_data(test_file_path)
     
-    # Continue with your sentiment analysis
+    # Process testing data
     test_df['cleaned_text'] = test_df['full_text'].apply(clean_text)
     X_new_test = vectorizer.transform(test_df['cleaned_text'])
     test_predictions = model.predict(X_new_test)
@@ -267,12 +236,6 @@ try:
     
     # Add predictions to the testing DataFrame
     test_df['predicted_sentiment'] = test_predictions
-    
-    # Menampilkan Contoh Data Serta Klasifikasinya
-    # print("\nSample of Testing Results:")
-    # for i, (text, sentiment) in enumerate(zip(test_df['full_text'][:5], test_predictions[:5])):
-    #     print(f"\nText {i+1}: {text}")
-    #     print(f"Predicted Sentiment: {'Positive' if sentiment == 1 else 'Negative'}")
 
 except Exception as e:
     print(f"Error processing testing data: {str(e)}")
@@ -290,16 +253,13 @@ def analyze_user_input():
             print("Exiting interactive analysis...")
             break
         
-        # Clean and process user input
         cleaned_input = clean_text(user_input)
         vectorized_input = vectorizer.transform([cleaned_input])
         prediction = model.predict(vectorized_input)[0]
         
-        # Get prediction probability
         probabilities = model.predict_proba(vectorized_input)[0]
         confidence = max(probabilities) * 100
         
-        # Display results
         print("\nAnalysis Results:")
         print(f"Text: {user_input}")
         print(f"Sentiment: {'Positive' if prediction == 1 else 'Negative' if prediction == 0 else 'Netral'}")
